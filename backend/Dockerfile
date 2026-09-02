@@ -1,31 +1,21 @@
 # ============================================================================
 # FixNex Backend
 #
-# Multi-purpose production image:
-#   1. FastAPI API/Web Service
-#   2. Celery Background Worker
-#
-# Includes:
-#   - Python 3.11
-#   - PostgreSQL dependencies
-#   - WeasyPrint dependencies
+# Production Docker image for:
+#   - FastAPI
 #   - Nmap
-#   - WhatWeb
 #   - Nuclei
+#   - WhatWeb
+#   - PostgreSQL
+#   - WeasyPrint
 #
-# The same Docker image is used by:
+# Celery is supported by the application but is NOT required when:
 #
-#   Render Web Service
-#       -> Uvicorn / FastAPI
+#   TASK_RUNNER=thread
 #
-#   Render Background Worker
-#       -> Celery
+# This allows FixNex to run on a Render Web Service without a separate
+# paid Celery Background Worker.
 # ============================================================================
-
-
-# ----------------------------------------------------------------------------
-# Base image
-# ----------------------------------------------------------------------------
 
 FROM python:3.11-slim
 
@@ -62,12 +52,12 @@ WORKDIR /app
 #   - Nmap
 #   - WhatWeb
 #
-# Build/database/network:
+# Other:
 #   - curl
 #   - ca-certificates
 #   - unzip
 #   - gcc
-#   - libpq-dev
+#   - PostgreSQL development libraries
 # ----------------------------------------------------------------------------
 
 RUN apt-get update \
@@ -92,10 +82,7 @@ RUN apt-get update \
 # ----------------------------------------------------------------------------
 # Install Nuclei
 #
-# ProjectDiscovery Nuclei official release.
-#
-# Docker BuildKit supplies TARGETARCH automatically, but amd64 is used as
-# the default for Render's normal x86_64 infrastructure.
+# ProjectDiscovery official release.
 # ----------------------------------------------------------------------------
 
 ARG NUCLEI_VERSION=3.3.7
@@ -112,7 +99,19 @@ RUN set -eux; \
 
 
 # ----------------------------------------------------------------------------
-# Install Python dependencies
+# Verify scanner binaries
+#
+# If any of these fail, the Docker build stops.
+# This prevents deploying a container where scanners are silently missing.
+# ----------------------------------------------------------------------------
+
+RUN nmap --version \
+    && whatweb --version \
+    && nuclei -version
+
+
+# ----------------------------------------------------------------------------
+# Python dependencies
 # ----------------------------------------------------------------------------
 
 COPY requirements.txt /app/requirements.txt
@@ -129,41 +128,38 @@ COPY . /app
 
 
 # ----------------------------------------------------------------------------
-# Create non-root application user
-#
-# Security scanners are executed without root privileges.
-#
-# Nmap should use TCP connect scans rather than privileged raw-packet scans.
+# Create non-root FixNex user
 # ----------------------------------------------------------------------------
 
 RUN useradd \
         --create-home \
         --shell /bin/bash \
         --uid 10001 \
-        prcampus \
+        fixnex \
     && mkdir -p /app/storage \
-    && mkdir -p /home/prcampus/.config \
-    && mkdir -p /home/prcampus/.cache \
-    && chown -R prcampus:prcampus /app \
-    && chown -R prcampus:prcampus /home/prcampus
+    && mkdir -p /home/fixnex/.config \
+    && mkdir -p /home/fixnex/.cache \
+    && chown -R fixnex:fixnex /app \
+    && chown -R fixnex:fixnex /home/fixnex
 
 
 # ----------------------------------------------------------------------------
 # Runtime environment
 # ----------------------------------------------------------------------------
 
-ENV HOME=/home/prcampus \
+ENV HOME=/home/fixnex \
     PATH=/usr/local/bin:/usr/bin:/bin
 
-USER prcampus
+
+# ----------------------------------------------------------------------------
+# Run application as non-root user
+# ----------------------------------------------------------------------------
+
+USER fixnex
 
 
 # ----------------------------------------------------------------------------
 # FastAPI port
-#
-# Used by the Render Web Service.
-#
-# The Celery worker does not need to listen on this port.
 # ----------------------------------------------------------------------------
 
 EXPOSE 8000
@@ -171,12 +167,6 @@ EXPOSE 8000
 
 # ----------------------------------------------------------------------------
 # Default command
-#
-# Render Web Service:
-#   Uses this command automatically.
-#
-# Render Background Worker:
-#   Overrides this command with the Celery worker command.
 # ----------------------------------------------------------------------------
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
