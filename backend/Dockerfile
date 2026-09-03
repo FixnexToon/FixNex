@@ -6,6 +6,7 @@
 #   - Nmap
 #   - Nuclei
 #   - WhatWeb
+#   - OWASP ZAP
 #   - PostgreSQL
 #   - WeasyPrint
 #
@@ -13,8 +14,6 @@
 #
 #   TASK_RUNNER=thread
 #
-# This allows FixNex to run on a Render Web Service without a separate
-# paid Celery Background Worker.
 # ============================================================================
 
 FROM python:3.11-slim
@@ -39,25 +38,6 @@ WORKDIR /app
 
 # ----------------------------------------------------------------------------
 # System dependencies
-#
-# WeasyPrint:
-#   - Pango
-#   - Cairo
-#   - GDK Pixbuf
-#   - libffi
-#   - shared-mime-info
-#   - fonts
-#
-# Security scanners:
-#   - Nmap
-#   - WhatWeb
-#
-# Other:
-#   - curl
-#   - ca-certificates
-#   - unzip
-#   - gcc
-#   - PostgreSQL development libraries
 # ----------------------------------------------------------------------------
 
 RUN apt-get update \
@@ -76,13 +56,12 @@ RUN apt-get update \
         unzip \
         gcc \
         libpq-dev \
+        openjdk-21-jre-headless \
     && rm -rf /var/lib/apt/lists/*
 
 
 # ----------------------------------------------------------------------------
 # Install Nuclei
-#
-# ProjectDiscovery official release.
 # ----------------------------------------------------------------------------
 
 ARG NUCLEI_VERSION=3.3.7
@@ -99,15 +78,30 @@ RUN set -eux; \
 
 
 # ----------------------------------------------------------------------------
+# Install OWASP ZAP
+# ----------------------------------------------------------------------------
+
+ARG ZAP_VERSION=2.16.1
+
+RUN set -eux; \
+    curl -fsSL \
+        -o /tmp/ZAP.tar.gz \
+        "https://github.com/zaproxy/zaproxy/releases/download/v${ZAP_VERSION}/ZAP_${ZAP_VERSION}_Linux.tar.gz"; \
+    tar -xzf /tmp/ZAP.tar.gz -C /opt; \
+    mv "/opt/ZAP_${ZAP_VERSION}" /opt/zap; \
+    rm -f /tmp/ZAP.tar.gz; \
+    chmod +x /opt/zap/zap.sh
+
+
+# ----------------------------------------------------------------------------
 # Verify scanner binaries
-#
-# If any of these fail, the Docker build stops.
-# This prevents deploying a container where scanners are silently missing.
 # ----------------------------------------------------------------------------
 
 RUN nmap --version \
     && whatweb --version \
-    && nuclei -version
+    && nuclei -version \
+    && java -version \
+    && /opt/zap/zap.sh -version
 
 
 # ----------------------------------------------------------------------------
@@ -140,7 +134,8 @@ RUN useradd \
     && mkdir -p /home/fixnex/.config \
     && mkdir -p /home/fixnex/.cache \
     && chown -R fixnex:fixnex /app \
-    && chown -R fixnex:fixnex /home/fixnex
+    && chown -R fixnex:fixnex /home/fixnex \
+    && chown -R fixnex:fixnex /opt/zap
 
 
 # ----------------------------------------------------------------------------
@@ -148,7 +143,7 @@ RUN useradd \
 # ----------------------------------------------------------------------------
 
 ENV HOME=/home/fixnex \
-    PATH=/usr/local/bin:/usr/bin:/bin
+    PATH=/usr/local/bin:/usr/bin:/bin:/opt/zap
 
 
 # ----------------------------------------------------------------------------
@@ -166,7 +161,14 @@ EXPOSE 8000
 
 
 # ----------------------------------------------------------------------------
-# Default command
+# Start entrypoint
+# ----------------------------------------------------------------------------
+
+ENTRYPOINT ["/app/entrypoint.sh"]
+
+
+# ----------------------------------------------------------------------------
+# FastAPI command
 # ----------------------------------------------------------------------------
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
