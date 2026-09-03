@@ -120,10 +120,7 @@ RUN python -m pip install --upgrade pip \
 
 COPY . /app
 
-
-# ----------------------------------------------------------------------------
-# Create non-root FixNex user
-# ----------------------------------------------------------------------------
+RUN chmod +x /app/entrypoint.sh
 
 RUN useradd \
         --create-home \
@@ -145,7 +142,6 @@ ENV HOME=/home/fixnex \
     PATH=/usr/local/bin:/usr/bin:/bin:/opt/zap
 
 USER fixnex
-
 EXPOSE 8000
 
 CMD ["sh", "-c", "/app/entrypoint.sh uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
