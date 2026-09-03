@@ -6,13 +6,20 @@
 #   - Nmap
 #   - Nuclei
 #   - WhatWeb
-#   - OWASP ZAP
 #   - PostgreSQL
 #   - WeasyPrint
 #
 # Celery is supported by the application but is NOT required when:
 #
 #   TASK_RUNNER=thread
+#
+# OWASP ZAP has been intentionally removed to reduce:
+#   - Docker image size
+#   - Build time
+#   - RAM usage
+#   - CPU usage
+#   - Startup time
+#   - Render port-detection issues
 #
 # ============================================================================
 
@@ -56,7 +63,6 @@ RUN apt-get update \
         unzip \
         gcc \
         libpq-dev \
-        openjdk-21-jre-headless \
     && rm -rf /var/lib/apt/lists/*
 
 
@@ -78,30 +84,12 @@ RUN set -eux; \
 
 
 # ----------------------------------------------------------------------------
-# Install OWASP ZAP
-# ----------------------------------------------------------------------------
-
-ARG ZAP_VERSION=2.16.1
-
-RUN set -eux; \
-    curl -fsSL \
-        -o /tmp/ZAP.tar.gz \
-        "https://github.com/zaproxy/zaproxy/releases/download/v${ZAP_VERSION}/ZAP_${ZAP_VERSION}_Linux.tar.gz"; \
-    tar -xzf /tmp/ZAP.tar.gz -C /opt; \
-    mv "/opt/ZAP_${ZAP_VERSION}" /opt/zap; \
-    rm -f /tmp/ZAP.tar.gz; \
-    chmod +x /opt/zap/zap.sh
-
-
-# ----------------------------------------------------------------------------
 # Verify scanner binaries
 # ----------------------------------------------------------------------------
 
 RUN nmap --version \
     && whatweb --version \
-    && nuclei -version \
-    && java -version \
-    && /opt/zap/zap.sh -version
+    && nuclei -version
 
 
 # ----------------------------------------------------------------------------
@@ -122,6 +110,11 @@ COPY . /app
 
 RUN chmod +x /app/entrypoint.sh
 
+
+# ----------------------------------------------------------------------------
+# Create non-root user
+# ----------------------------------------------------------------------------
+
 RUN useradd \
         --create-home \
         --shell /bin/bash \
@@ -131,18 +124,23 @@ RUN useradd \
     && mkdir -p /home/fixnex/.config \
     && mkdir -p /home/fixnex/.cache \
     && chown -R fixnex:fixnex /app \
-    && chown -R fixnex:fixnex /home/fixnex \
-    && chown -R fixnex:fixnex /opt/zap
+    && chown -R fixnex:fixnex /home/fixnex
 
 
 # ----------------------------------------------------------------------------
 # Runtime environment
 # ----------------------------------------------------------------------------
+
 ENV HOME=/home/fixnex \
-    PATH=/usr/local/bin:/usr/bin:/bin:/opt/zap
+    PATH=/usr/local/bin:/usr/bin:/bin
 
 USER fixnex
+
 EXPOSE 8000
 
-CMD ["sh", "-c", "/app/entrypoint.sh uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
 
+# ----------------------------------------------------------------------------
+# Start FastAPI
+# ----------------------------------------------------------------------------
+
+CMD ["sh", "-c", "/app/entrypoint.sh uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
