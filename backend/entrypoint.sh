@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "========================================"
+echo "Starting FixNex"
+echo "========================================"
+
+# ==================================================
+# OWASP ZAP - OPTIONAL
+# ==================================================
+
 echo "Starting OWASP ZAP..."
 
 mkdir -p /home/fixnex/.ZAP
@@ -17,7 +25,7 @@ if [ -n "${ZAP_API_KEY:-}" ]; then
     -config "api.addrs.addr.regex=true" \
     > /tmp/zap.log 2>&1 &
 else
-  echo "Starting ZAP without API key protection (local testing only)..."
+  echo "Starting ZAP without API key protection..."
 
   /opt/zap/zap.sh \
     -daemon \
@@ -31,13 +39,17 @@ fi
 
 ZAP_PID=$!
 
+echo "ZAP process started with PID ${ZAP_PID}"
+
+# ==================================================
+# Wait for ZAP - NON-FATAL
+# ==================================================
+
 echo "Waiting for OWASP ZAP..."
 
 ZAP_READY=false
 
-# ZAP can take several minutes on first startup while loading/updating addons.
-# 180 attempts x 2 seconds = 360 seconds maximum wait.
-for i in $(seq 1 180); do
+for i in $(seq 1 90); do
 
   if [ -n "${ZAP_API_KEY:-}" ]; then
     if curl -fsS \
@@ -59,40 +71,43 @@ for i in $(seq 1 180); do
     fi
   fi
 
-  # If ZAP process has exited, fail immediately and show its log.
+  # ZAP died -> don't kill FixNex
   if ! kill -0 "$ZAP_PID" 2>/dev/null; then
-    echo "OWASP ZAP failed to start."
-    echo "----- ZAP LOG -----"
-    cat /tmp/zap.log || true
-    echo "-------------------"
-    exit 1
+    echo "WARNING: OWASP ZAP process exited."
+    break
   fi
 
   sleep 2
 done
 
-if [ "$ZAP_READY" != "true" ]; then
-  echo "OWASP ZAP did not become ready within 360 seconds."
+if [ "$ZAP_READY" = "true" ]; then
+  echo "OWASP ZAP is ready."
+
+  if [ -n "${ZAP_API_KEY:-}" ]; then
+    curl -fsS \
+      --get \
+      --data-urlencode "apikey=${ZAP_API_KEY}" \
+      "http://127.0.0.1:8080/JSON/core/view/version/" \
+      || echo "WARNING: Could not verify ZAP API."
+  else
+    curl -fsS \
+      "http://127.0.0.1:8080/JSON/core/view/version/" \
+      || echo "WARNING: Could not verify ZAP API."
+  fi
+
+  echo
+else
+  echo "WARNING: OWASP ZAP is unavailable."
+  echo "ZAP-based scanning will be unavailable."
+  echo "The remaining FixNex services will continue."
   echo "----- ZAP LOG -----"
   cat /tmp/zap.log || true
   echo "-------------------"
-  exit 1
 fi
 
-echo "OWASP ZAP is ready."
-
-# Confirm the ZAP API version once more.
-if [ -n "${ZAP_API_KEY:-}" ]; then
-  curl -fsS \
-    --get \
-    --data-urlencode "apikey=${ZAP_API_KEY}" \
-    "http://127.0.0.1:8080/JSON/core/view/version/"
-else
-  curl -fsS \
-    "http://127.0.0.1:8080/JSON/core/view/version/"
-fi
-
-echo
+# ==================================================
+# PostgreSQL
+# ==================================================
 
 echo "Waiting for PostgreSQL..."
 
@@ -117,20 +132,42 @@ done
 
 echo "PostgreSQL is ready."
 
+# ==================================================
+# Database migrations
+# ==================================================
+
 echo "Applying database migrations..."
+
 alembic upgrade head
+
+echo "Database migrations completed."
+
+# ==================================================
+# Optional demo seed
+# ==================================================
 
 if [ "${SEED_DEMO_ON_START:-false}" = "true" ]; then
   echo "Seeding the demonstration dataset..."
   python -m app.cli seed-demo || echo "Seeding skipped."
 fi
 
+# ==================================================
+# Cleanup
+# ==================================================
+
 cleanup() {
   echo "Stopping OWASP ZAP..."
-  kill "$ZAP_PID" 2>/dev/null || true
+
+  if [ -n "${ZAP_PID:-}" ] && kill -0 "$ZAP_PID" 2>/dev/null; then
+    kill "$ZAP_PID" 2>/dev/null || true
+  fi
 }
 
 trap cleanup EXIT INT TERM
+
+# ==================================================
+# Start FixNex API
+# ==================================================
 
 echo "Starting FixNex API..."
 
