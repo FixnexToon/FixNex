@@ -8,19 +8,9 @@ echo "========================================"
 # ==================================================
 # FAST STARTUP
 # ==================================================
-#
-# IMPORTANT:
-# OWASP ZAP is NOT started here.
-#
-# ZAP is started lazily by the ZAP scanner only when
-# a ZAP scan is actually requested.
-#
-# This prevents Java/ZAP startup from consuming CPU/RAM
-# during normal API startup.
-# ==================================================
 
-echo "ZAP lazy-start enabled."
-echo "ZAP will start only when a ZAP scan is requested."
+echo "OWASP ZAP is disabled."
+echo "Starting FixNex API directly."
 
 # ==================================================
 # DATABASE
@@ -45,7 +35,7 @@ if [ "${SEED_DEMO_ON_START:-false}" = "true" ]; then
 fi
 
 # ==================================================
-# START FIXNEX API IMMEDIATELY
+# START FIXNEX API
 # ==================================================
 
 echo "========================================"
