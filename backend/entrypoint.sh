@@ -6,7 +6,7 @@ echo "Starting FixNex"
 echo "========================================"
 
 # ==================================================
-# OWASP ZAP - OPTIONAL / BACKGROUND
+# OWASP ZAP - START IN BACKGROUND
 # ==================================================
 
 ZAP_PID=""
@@ -44,62 +44,18 @@ ZAP_PID=$!
 echo "ZAP started in background with PID ${ZAP_PID}"
 
 # ==================================================
-# PostgreSQL
-# ==================================================
-
-echo "Waiting for PostgreSQL..."
-
-until python -c "
-import sys
-import psycopg2
-from app.core.config import settings
-
-url = settings.DATABASE_URL.replace(
-    'postgresql+psycopg2',
-    'postgresql'
-)
-
-try:
-    psycopg2.connect(url).close()
-except Exception as exc:
-    print(exc)
-    sys.exit(1)
-" 2>/dev/null; do
-    sleep 2
-done
-
-echo "PostgreSQL is ready."
-
-# ==================================================
-# Database migrations
-# ==================================================
-
-echo "Applying database migrations..."
-
-alembic upgrade head
-
-echo "Database migrations completed."
-
-# ==================================================
-# Optional demo seed
-# ==================================================
-
-if [ "${SEED_DEMO_ON_START:-false}" = "true" ]; then
-    echo "Seeding the demonstration dataset..."
-    python -m app.cli seed-demo || echo "Seeding skipped."
-fi
-
-# ==================================================
-# ZAP background status
+# ZAP READINESS CHECK - BACKGROUND
 # ==================================================
 
 check_zap() {
-    sleep 5
+    echo "ZAP readiness check running in background..."
 
-    echo "Checking OWASP ZAP availability..."
+    # Give Java/ZAP a little time to initialize.
+    sleep 5
 
     for i in $(seq 1 90); do
 
+        # ZAP process died
         if ! kill -0 "$ZAP_PID" 2>/dev/null; then
             echo "WARNING: OWASP ZAP process exited."
             echo "ZAP-based scanning will be unavailable."
@@ -109,7 +65,9 @@ check_zap() {
             return 0
         fi
 
+        # API key enabled
         if [ -n "${ZAP_API_KEY:-}" ]; then
+
             if curl -fsS \
                 --get \
                 --data-urlencode "apikey=${ZAP_API_KEY}" \
@@ -127,7 +85,10 @@ check_zap() {
                 echo
                 return 0
             fi
+
+        # API key disabled
         else
+
             if curl -fsS \
                 "http://127.0.0.1:8080/JSON/core/view/version/" \
                 >/dev/null 2>&1; then
@@ -141,6 +102,7 @@ check_zap() {
                 echo
                 return 0
             fi
+
         fi
 
         sleep 2
@@ -148,17 +110,45 @@ check_zap() {
 
     echo "WARNING: OWASP ZAP did not become ready."
     echo "ZAP-based scanning may be unavailable."
-    echo "FixNex will continue running."
+    echo "FixNex API will continue running."
+
     echo "----- ZAP LOG -----"
     cat /tmp/zap.log || true
     echo "-------------------"
 }
 
-# Run ZAP readiness check in background.
+# IMPORTANT:
+# Do not wait for ZAP.
 check_zap &
 
 # ==================================================
-# Cleanup
+# DATABASE
+# ==================================================
+#
+# IMPORTANT:
+# We intentionally DO NOT wait for PostgreSQL here.
+# FastAPI starts immediately.
+#
+# Database connectivity is handled by the application.
+# Migrations should be executed during deployment, not
+# every time the Render container starts.
+# ==================================================
+
+echo "Skipping startup database wait."
+
+echo "Skipping startup Alembic migration."
+
+# ==================================================
+# OPTIONAL DEMO SEED
+# ==================================================
+
+if [ "${SEED_DEMO_ON_START:-false}" = "true" ]; then
+    echo "Demo seed requested."
+    echo "Skipping demo seed during fast startup."
+fi
+
+# ==================================================
+# CLEANUP
 # ==================================================
 
 cleanup() {
@@ -172,9 +162,11 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # ==================================================
-# Start FixNex API
+# START FIXNEX API IMMEDIATELY
 # ==================================================
 
-echo "Starting FixNex API..."
+echo "========================================"
+echo "Starting FixNex API immediately..."
+echo "========================================"
 
 exec "$@"
