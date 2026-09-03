@@ -145,7 +145,7 @@ ENV HOME=/home/fixnex \
     PATH=/usr/local/bin:/usr/bin:/bin:/opt/zap
 
 USER fixnex
+
 EXPOSE 8000
 
-ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "/app/entrypoint.sh uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
